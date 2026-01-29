@@ -14,6 +14,20 @@
     "./readme": "./Readme.md",
     "./changelog": "./changelog.md"
   },
+  "directories": {
+    "test": "test"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/SirPepe/no-use-after-free.js.git"
+  },
+  "bugs": {
+    "url": "https://github.com/SirPepe/no-use-after-free.js/issues"
+  },
+  "homepage": "https://github.com/SirPepe/no-use-after-free.js#readme",
   "scripts": {
     "clean": "rm -rf dist",
     "lint": "npx prettier . --check && eslint",
