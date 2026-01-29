@@ -1,0 +1,44 @@
+{
+  "name": "@sirpepe/no-use-after-free",
+  "version": "0.0.1",
+  "description": "Prevent use-after-free when working with the explicit resource management API",
+  "main": "dist/main.js",
+  "types": "dist/index.d.ts",
+  "type": "module",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "require": "./dist/index.js",
+      "default": "./dist/index.js"
+    },
+    "./readme": "./Readme.md",
+    "./changelog": "./changelog.md"
+  },
+  "scripts": {
+    "clean": "rm -rf dist",
+    "lint": "npx prettier . --check && eslint",
+    "check": "eslint && tsc --noEmit",
+    "test": "node -e \"$(esbuild test/index.ts --bundle --platform=node --target=node24)\"",
+    "build": "esbuild src/index.ts --bundle --minify --target=es2022 --format=esm --outdir=dist",
+    "types": "tsc",
+    "release": "npm run check && npm run types && npm run build && release-it"
+  },
+  "author": "peter@peterkroener.de",
+  "license": "MIT",
+  "devDependencies": {
+    "@types/node": "^25.0.10",
+    "@typescript-eslint/eslint-plugin": "^8.54.0",
+    "@typescript-eslint/parser": "^8.54.0",
+    "esbuild": "^0.27.2",
+    "eslint": "^9.39.2",
+    "eslint-config-prettier": "^10.1.8",
+    "globals": "^17.2.0",
+    "prettier": "^3.8.1",
+    "release-it": "^19.2.4",
+    "typescript": "^5.9.3",
+    "typescript-eslint": "^8.54.0"
+  },
+  "volta": {
+    "node": "24.13.0"
+  }
+}
