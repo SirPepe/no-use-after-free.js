@@ -1,6 +1,6 @@
 {
   "name": "@sirpepe/no-use-after-free",
-  "version": "0.0.1",
+  "version": "0.1.0",
   "description": "Prevent use-after-free when working with the explicit resource management API",
   "main": "dist/main.js",
   "types": "dist/index.d.ts",
