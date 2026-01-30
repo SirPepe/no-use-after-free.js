@@ -3,15 +3,20 @@ const revoked = new WeakSet<any>();
 
 // Returns a proxy that is revoked once disposal logic has run to completion
 function trackUseAfterFree<T extends Disposable | AsyncDisposable>(
-  target: T,
+  base: T,
+  unwrapReceivers: boolean,
 ): T {
-  const { proxy, revoke } = Proxy.revocable(target, {
+  const { proxy, revoke } = Proxy.revocable(base, {
     get(target, key, receiver) {
-      const value = Reflect.get(target, key, target);
+      const value = Reflect.get(
+        target,
+        key,
+        unwrapReceivers ? unwrap(receiver) : receiver,
+      );
       // Sync
       if (key === Symbol.dispose && typeof value === "function") {
         return function (this: T): void {
-          const result = value.call(this);
+          const result = value.call(unwrap(this));
           revoke();
           revoked.add(proxy);
           return result;
@@ -21,7 +26,7 @@ function trackUseAfterFree<T extends Disposable | AsyncDisposable>(
       // Async
       if (key === Symbol.asyncDispose && typeof value === "function") {
         return async function (this: T): Promise<void> {
-          const result = await value.call(this);
+          const result = await value.call(unwrap(this));
           revoke();
           revoked.add(proxy);
           return result;
@@ -32,8 +37,7 @@ function trackUseAfterFree<T extends Disposable | AsyncDisposable>(
       // fields working
       if (typeof value === "function") {
         return function (this: T, ...args: unknown[]): unknown {
-          const that = this === receiver ? target : this;
-          return value.apply(that, args);
+          return value.apply(unwrap(this), args);
         };
       }
 
@@ -42,11 +46,16 @@ function trackUseAfterFree<T extends Disposable | AsyncDisposable>(
 
     // Non-default set trap uses target as the receiver to keep private fields
     // working
-    set(target, key, newValue) {
-      return Reflect.set(target, key, newValue, target);
+    set(target, key, newValue, receiver) {
+      return Reflect.set(
+        target,
+        key,
+        newValue,
+        unwrapReceivers ? unwrap(receiver) : receiver,
+      );
     },
   });
-  proxies.set(proxy, target);
+  proxies.set(proxy, base);
   return proxy;
 }
 
@@ -72,22 +81,26 @@ function decorator<T extends new (...args: unknown[]) => unknown>(
   if (context.kind !== "class") {
     throw new Error("Class decorator applied to " + context.kind);
   }
-  return new Proxy(target, {
+
+  const classProxy: T = new Proxy(target, {
     construct(target, args, newTarget) {
-      return trackUseAfterFree(Reflect.construct(target, args, newTarget));
+      const inheritsFromDecorated = newTarget !== classProxy;
+      return trackUseAfterFree(
+        Reflect.construct(target, args, newTarget),
+        !inheritsFromDecorated,
+      );
     },
     get(target, key, receiver) {
-      const value = Reflect.get(target, key, target);
+      const value = Reflect.get(target, key, unwrap(receiver));
       if (typeof value === "function") {
         return function (this: T, ...inputArgs: unknown[]): unknown {
-          const that = this === receiver ? target : this;
-          const unwrappedArgs = inputArgs.map(unwrap);
-          return value.apply(that, unwrappedArgs);
+          return value.apply(unwrap(this), inputArgs.map(unwrap));
         };
       }
       return value;
     },
   });
+  return classProxy;
 }
 
 export default function noUseAfterFree<
@@ -106,7 +119,7 @@ export default function noUseAfterFree<T>(target: any, context?: any): T {
   if (context) {
     return decorator(target, context);
   } else {
-    return trackUseAfterFree(target);
+    return trackUseAfterFree(target, true);
   }
 }
 

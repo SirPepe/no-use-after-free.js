@@ -60,6 +60,41 @@ suite(`Sync`, () => {
     assert.throws(() => instance.x);
   });
 
+  test("private fields keep working inside disposal logic", () => {
+    const spy = mock.fn();
+    class Example {
+      #x = 1;
+      get x() {
+        return this.#x;
+      }
+      [Symbol.dispose]() {
+        spy(this.#x);
+      }
+    }
+    const instance = (function () {
+      using instance = noUseAfterFree(new Example());
+      return instance;
+    })();
+    assert.throws(() => instance.x);
+    assert.equal(spy.mock.callCount(), 1);
+  });
+
+  test("'this' shenanigans remain possible", () => {
+    class Example {
+      #x: number;
+      constructor(value: number) {
+        this.#x = value;
+      }
+      readX() {
+        return this.#x;
+      }
+      [Symbol.dispose]() {}
+    }
+    const a = noUseAfterFree(new Example(1));
+    const b = noUseAfterFree(new Example(2));
+    assert.equal(a.readX.call(b), 2);
+  });
+
   test("unwrap()", () => {
     class Example {
       #x = 1;
@@ -161,7 +196,25 @@ suite(`Async`, () => {
     });
   });
 
-  test("unwrap()", () => {
+  test("private fields keep working inside disposal logic", async () => {
+    const spy = mock.fn();
+    class Example {
+      #x = 1;
+      get x() {
+        return this.#x;
+      }
+      async [Symbol.asyncDispose]() {
+        spy(this.#x);
+      }
+    }
+    await (async function () {
+      // eslint-disable-next-line
+      await using instance = noUseAfterFree(new Example());
+    })();
+    assert.equal(spy.mock.callCount(), 1);
+  });
+
+  test("unwrap()", async () => {
     class Example {
       #x = 1;
       static readX(instance: Example) {
@@ -169,17 +222,19 @@ suite(`Async`, () => {
       }
       async [Symbol.asyncDispose]() {}
     }
-    (async function () {
-      await using instance = noUseAfterFree(new Example());
-      // Fails: proxy can't access #x
-      assert.throws(() => Example.readX(instance));
-      // Works: proxy's content can access #x
-      assert.equal(Example.readX(noUseAfterFree.unwrap(instance)), 1);
-      // Disposing manually for the sake of testing
-      await instance[Symbol.asyncDispose]();
-      // Fails: proxy has been revoked
-      assert.throws(() => noUseAfterFree.unwrap(instance));
-    })();
+    assert.rejects(
+      (async function () {
+        await using instance = noUseAfterFree(new Example());
+        // Fails: proxy can't access #x
+        assert.throws(() => Example.readX(instance));
+        // Works: proxy's content can access #x
+        assert.equal(Example.readX(noUseAfterFree.unwrap(instance)), 1);
+        // Disposing manually for the sake of testing
+        await instance[Symbol.asyncDispose]();
+        // Fails: proxy has been revoked
+        assert.throws(() => noUseAfterFree.unwrap(instance));
+      })(),
+    );
   });
 });
 
@@ -206,5 +261,105 @@ suite(`Decorators`, () => {
     assert.throws(() => instance.x);
     assert.throws(() => Example.readX(instance));
     assert.throws(() => noUseAfterFree.unwrap(instance));
+  });
+
+  test("Decorated subclassing", () => {
+    class Base {
+      [Symbol.dispose]() {}
+    }
+    @noUseAfterFree
+    class Example extends Base {
+      #x = 1;
+      get x() {
+        return this.#x;
+      }
+      static readX(instance: Example) {
+        return instance.#x;
+      }
+    }
+    const instance = (function () {
+      using instance = new Example();
+      assert.equal(instance.x, 1);
+      assert.equal(Example.readX(instance), 1);
+      return instance;
+    })();
+    // The below all fail: proxy has been revoked
+    assert.throws(() => instance.x);
+    assert.throws(() => Example.readX(instance));
+    assert.throws(() => noUseAfterFree.unwrap(instance));
+  });
+
+  test("Decorated subclassing of subclasses", () => {
+    class Base {
+      [Symbol.dispose]() {}
+    }
+    class Something extends Base {}
+    @noUseAfterFree
+    class Example extends Something {
+      #x = 1;
+      get x() {
+        return this.#x;
+      }
+      static readX(instance: Example) {
+        return instance.#x;
+      }
+    }
+    const instance = (function () {
+      using instance = new Example();
+      assert.equal(instance.x, 1);
+      assert.equal(Example.readX(instance), 1);
+      return instance;
+    })();
+    // The below all fail: proxy has been revoked
+    assert.throws(() => instance.x);
+    assert.throws(() => Example.readX(instance));
+    assert.throws(() => noUseAfterFree.unwrap(instance));
+  });
+
+  test("Cursed readme example", () => {
+    // Note that the decorator, because it only gets applied to the base class,
+    // can't do anything to subclasses. It does wrap "this" in a proxy but can't
+    // touch subclasses static methods.
+    @noUseAfterFree
+    class Base {
+      [Symbol.dispose]() {}
+    }
+
+    class Example extends Base {
+      // This adds an actual property on the instance. This means that this
+      // property can't be accessed once the proxy is revoked after
+      // Symbol.dispose() has run to completion.
+      notSecret = 42;
+
+      // This does actually NOT add a property on the instance, but works more
+      // like special of variable that's only valid inside the "scope" defined
+      // by the Example class
+      #secret = 23;
+
+      static readSecret(instance: Example) {
+        return instance.#secret;
+      }
+
+      static readNotSecret(instance: Example) {
+        return instance.notSecret;
+      }
+    }
+    // "instance" is immediately revoked once it gets returned from the IIFE
+    const instance = (function () {
+      using ex = new Example();
+      assert.equal(Example.readSecret(ex), 23); // works as expected
+      assert.equal(Example.readNotSecret(ex), 42); // works as expected
+      return ex;
+    })();
+    // Fails; instance has been revoked
+    assert.throws(() => instance.notSecret);
+    // Fails; instance has been revoked
+    assert.throws(() => Example.readNotSecret(instance));
+    // !!! DOES NOT FAIL !!! Reading the private field does not involve an
+    // actual property read from "instance", so it can't be prevented by the
+    // library.
+    assert.throws(() => {
+      assert.throws(() => Example.readSecret(instance)); // assertion error
+    });
   });
 });
