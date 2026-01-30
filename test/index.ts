@@ -20,6 +20,23 @@ suite(`Sync`, () => {
     assert.throws(() => instance.x);
   });
 
+  test("deal with multiple applications of useAfterFree", () => {
+    const spy = mock.fn();
+    class Example {
+      x = 1;
+      [Symbol.dispose]() {
+        spy();
+      }
+    }
+    const instance = (function () {
+      using instance = noUseAfterFree(noUseAfterFree(new Example()));
+      assert.equal(instance.x, 1);
+      return instance;
+    })();
+    assert.equal(spy.mock.callCount(), 1);
+    assert.throws(() => instance.x);
+  });
+
   test("works with non-disposable inputs", () => {
     class Example {
       x = 1;
@@ -105,6 +122,26 @@ suite(`Sync`, () => {
     }
     const instance = (function () {
       using instance = noUseAfterFree(new Example());
+      // Fails: proxy can't access #x
+      assert.throws(() => Example.readX(instance));
+      // Works: proxy's content can access #x
+      assert.equal(Example.readX(noUseAfterFree.unwrap(instance)), 1);
+      return instance;
+    })();
+    // Fails: proxy has been revoked
+    assert.throws(() => noUseAfterFree.unwrap(instance));
+  });
+
+  test("unwrap() deals with multiple applications of useAfterFree", () => {
+    class Example {
+      #x = 1;
+      static readX(instance: Example) {
+        return instance.#x;
+      }
+      [Symbol.dispose]() {}
+    }
+    const instance = (function () {
+      using instance = noUseAfterFree(noUseAfterFree(new Example()));
       // Fails: proxy can't access #x
       assert.throws(() => Example.readX(instance));
       // Works: proxy's content can access #x
@@ -264,6 +301,33 @@ suite(`Decorators`, () => {
   });
 
   test("Decorated subclassing", () => {
+    class Base {
+      [Symbol.dispose]() {}
+    }
+    @noUseAfterFree
+    class Example extends Base {
+      #x = 1;
+      get x() {
+        return this.#x;
+      }
+      static readX(instance: Example) {
+        return instance.#x;
+      }
+    }
+    const instance = (function () {
+      using instance = new Example();
+      assert.equal(instance.x, 1);
+      assert.equal(Example.readX(instance), 1);
+      return instance;
+    })();
+    // The below all fail: proxy has been revoked
+    assert.throws(() => instance.x);
+    assert.throws(() => Example.readX(instance));
+    assert.throws(() => noUseAfterFree.unwrap(instance));
+  });
+
+  test("Decorated subclassing with the decorator applied twice", () => {
+    @noUseAfterFree
     class Base {
       [Symbol.dispose]() {}
     }

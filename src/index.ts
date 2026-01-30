@@ -5,7 +5,13 @@ const revoked = new WeakSet<any>();
 function trackUseAfterFree<T extends Disposable | AsyncDisposable>(
   base: T,
   unwrapReceivers: boolean,
+  allowWrapping: boolean,
 ): T {
+  if (!allowWrapping && proxies.has(base)) {
+    console.log("yep");
+    return base;
+  }
+
   const { proxy, revoke } = Proxy.revocable(base, {
     get(target, key, receiver) {
       const value = Reflect.get(
@@ -88,6 +94,7 @@ function decorator<T extends new (...args: unknown[]) => unknown>(
       return trackUseAfterFree(
         Reflect.construct(target, args, newTarget),
         !inheritsFromDecorated,
+        true,
       );
     },
     get(target, key, receiver) {
@@ -119,7 +126,7 @@ export default function noUseAfterFree<T>(target: any, context?: any): T {
   if (context) {
     return decorator(target, context);
   } else {
-    return trackUseAfterFree(target, true);
+    return trackUseAfterFree(target, true, false);
   }
 }
 
